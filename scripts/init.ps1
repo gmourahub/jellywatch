@@ -14,17 +14,26 @@ function New-Hex([int]$bytes) {
 }
 
 if (Test-Path $envFile) {
-    Write-Host '.env já existe; mantendo o atual.'
+    Write-Host '.env já existe; mantendo os valores dele (-DataRoot e -ServerHost são ignorados).'
 } else {
     $content = Get-Content (Join-Path $root '.env.example') -Raw
-    $content = $content -replace '(?m)^RADARR_API_KEY=.*$', "RADARR_API_KEY=$(New-Hex 16)"
-    $content = $content -replace '(?m)^SONARR_API_KEY=.*$', "SONARR_API_KEY=$(New-Hex 16)"
-    $content = $content -replace '(?m)^PROWLARR_API_KEY=.*$', "PROWLARR_API_KEY=$(New-Hex 16)"
-    $content = $content -replace '(?m)^ADMIN_PASSWORD=.*$', "ADMIN_PASSWORD=$(New-Hex 8)"
     if ($DataRoot) { $content = $content -replace '(?m)^DATA_ROOT=.*$', "DATA_ROOT=$($DataRoot -replace '\\','/')" }
     if ($ServerHost) { $content = $content -replace '(?m)^SERVER_HOST=.*$', "SERVER_HOST=$ServerHost" }
     Set-Content -Path $envFile -Value $content -NoNewline -Encoding utf8NoBOM
     Write-Host ".env criado em $envFile"
+}
+
+# Gera as chaves de API vazias e troca a senha de exemplo (ou vazia) por uma aleatória.
+# Vale também para um .env copiado à mão do .env.example.
+$content = Get-Content $envFile -Raw
+$filled = $content
+foreach ($k in 'RADARR_API_KEY', 'SONARR_API_KEY', 'PROWLARR_API_KEY') {
+    $filled = $filled -replace "(?m)^$k=[ \t]*(?=\r?$)", "$k=$(New-Hex 16)"
+}
+$filled = $filled -replace '(?m)^ADMIN_PASSWORD=(troque-esta-senha)?[ \t]*(?=\r?$)', "ADMIN_PASSWORD=$(New-Hex 8)"
+if ($filled -ne $content) {
+    Set-Content -Path $envFile -Value $filled -NoNewline -Encoding utf8NoBOM
+    Write-Host 'Chaves de API e/ou senha geradas no .env'
 }
 
 # Credenciais opcionais vindas do ambiente ($env:OPENSUBTITLES_USERNAME / $env:OPENSUBTITLES_PASSWORD)

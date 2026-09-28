@@ -12,15 +12,52 @@ Jellyseerr (pedido) → Radarr/Sonarr (busca via Prowlarr) → qBittorrent (down
 
 Requisitos: Docker (Docker Desktop no Windows/macOS ou Docker Engine + compose plugin no Linux).
 
+### 1. Criar e preencher o `.env`
+
+Copie o arquivo de exemplo:
+
+```powershell
+Copy-Item .env.example .env     # Windows (PowerShell)
+```
+```sh
+cp .env.example .env            # Linux / macOS
+```
+
+Abra o `.env` e confira estes campos:
+
+| Campo | O que colocar | Obrigatório? |
+|---|---|---|
+| `DATA_ROOT` | Pasta onde ficam os filmes, as séries e os downloads. Use um disco com espaço sobrando. No Windows, use barras normais: `D:/Jellyfin/data`. No Linux: `/mnt/data` | **Sim**. O valor de exemplo (`D:/Jellyfin/data`) só serve se esse caminho existir na sua máquina |
+| `SERVER_HOST` | IP da máquina na rede local, por exemplo `192.168.0.10`. Descubra com `ipconfig` no Windows ou `hostname -I` no Linux. Ele entra nos links do Jellyseerr para o Jellyfin, o Radarr e o Sonarr e no resumo final do setup. Com `localhost`, tudo funciona nesta máquina, mas esses links não abrem na TV ou no celular | Recomendado |
+| `ADMIN_PASSWORD` | A senha de todos os serviços (usuário `ADMIN_USER`, que por padrão é `admin`). Se você deixar `troque-esta-senha` ou o campo vazio, o script gera uma senha aleatória | Não |
+| `OPENSUBTITLES_USERNAME` / `OPENSUBTITLES_PASSWORD` | Conta gratuita do [OpenSubtitles.com](https://www.opensubtitles.com). Sem ela, há pouca legenda em pt-BR | Não, mas recomendado |
+| `RADARR_API_KEY`, `SONARR_API_KEY`, `PROWLARR_API_KEY` | **Deixe vazio.** O script gera essas chaves | — |
+
+Os demais campos (fuso horário, idiomas, indexers) já têm valores padrão para o Brasil. Cada um está explicado no próprio `.env`.
+
+### 2. Rodar o script de instalação
+
 **Windows (PowerShell)**
 ```powershell
-.\scripts\init.ps1 -DataRoot D:/Jellyfin/data -ServerHost 192.168.0.10 -Up
+.\scripts\init.ps1 -Up
 ```
 
 **Linux / macOS**
 ```sh
-./scripts/init.sh /mnt/data 192.168.0.10 --up
+./scripts/init.sh --up
 ```
+
+> **Atalho sem editar o `.env`:** se o `.env` ainda **não** existir, o script cria o arquivo sozinho a partir do
+> `.env.example`. Nesse caso, passe a pasta de dados e o IP na linha de comando:
+> `.\scripts\init.ps1 -DataRoot D:/Jellyfin/data -ServerHost 192.168.0.10 -Up` (Windows) ou
+> `./scripts/init.sh /mnt/data 192.168.0.10 --up` (Linux/macOS).
+> Se o `.env` já existir, esses parâmetros são **ignorados** e valem os valores do arquivo.
+> Para mudar `DATA_ROOT` ou `SERVER_HOST` depois, edite o `.env` e rode `docker compose up -d`.
+> Depois de mudar o `SERVER_HOST`, rode também `docker compose up setup` para atualizar os links do Jellyseerr.
+
+### Alternativa: Proxmox VE
+
+No Proxmox, os scripts abaixo criam o `.env` dentro do LXC sozinhos. Os passos 1 e 2 acima não são necessários.
 
 **Proxmox VE (contêiner LXC)**: copie a pasta para o host e rode lá como root:
 ```sh
@@ -53,9 +90,9 @@ tudo por SSH usando a sua chave `~/.ssh/id_ed25519.pub` e mostra o IP e a senha 
 deixa o usuário `root@pam` repassar a GPU. Com um token, rode depois no shell do host:
 `pct set <CTID> --dev0 /dev/dri/renderD128,mode=0666 && pct reboot <CTID>`.
 
-O script cria o `.env` (chaves de API e senha admin aleatórias), sobe os contêineres e mostra o log
-do contêiner `setup`, que configura tudo sozinho. Sem `-Up`/`--up` ele só gera o `.env`; depois rode
-`docker compose up -d`.
+O script completa o `.env`: gera as chaves de API que estiverem vazias e a senha admin, se ainda for a de
+exemplo. Depois cria a pasta `DATA_ROOT`, sobe os contêineres e mostra o log do contêiner `setup`, que
+configura tudo sozinho. Sem `-Up`/`--up` ele só prepara o `.env`; depois rode `docker compose up -d`.
 
 A senha do admin fica em `ADMIN_PASSWORD` no `.env`. **Guarde o `.env`**: ele contém as chaves de API.
 

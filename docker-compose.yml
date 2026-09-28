@@ -1,0 +1,175 @@
+# Jellyfin Full Automation stack
+# Baseado em: https://jellywatch.app/blog/jellyfin-full-automation-guide-radarr-sonarr-bazarr-jellyseerr-2026
+#
+# Diferenças em relação ao guia (para funcionar em Docker Desktop/Windows e em Linux):
+#  - Jellyfin usa portas publicadas em vez de network_mode: host.
+#  - Um único volume /data (torrents + media) em todos os serviços, para hardlinks funcionarem.
+#  - Configs em volumes nomeados (SQLite em bind mount do Windows corrompe/trava).
+#  - Serviços "init" e "setup" configuram tudo automaticamente via API.
+#
+# Uso: copie .env.example para .env (ou rode scripts/init.ps1 / scripts/init.sh) e depois:
+#   docker compose up -d
+
+name: jellywatch
+
+x-arr-env: &arr-env
+  PUID: ${PUID}
+  PGID: ${PGID}
+  TZ: ${TZ}
+
+services:
+  # Pré-configura arquivos antes dos apps subirem (senha do qBittorrent).
+  init:
+    image: python:3.13-alpine
+    container_name: jf-init
+    command: ["python", "/setup/setup.py", "pre"]
+    env_file: .env
+    volumes:
+      - ./setup:/setup:ro
+      - qbittorrent-config:/qbittorrent-config
+      - ${DATA_ROOT}:/data
+    restart: "no"
+
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    environment:
+      TZ: ${TZ}
+      JELLYFIN_PublishedServerUrl: http://${SERVER_HOST}:8096
+    volumes:
+      - jellyfin-config:/config
+      - jellyfin-cache:/cache
+      - ${DATA_ROOT}/media:/data/media:ro
+    ports:
+      - "8096:8096"
+    # Linux com GPU Intel/AMD: descomente para transcodificação por hardware.
+    # devices:
+    #   - /dev/dri/renderD128:/dev/dri/renderD128
+    restart: unless-stopped
+
+  jellyseerr:
+    # Seerr = sucessor oficial do Jellyseerr/Overseerr (o Jellyseerr 2.x não autentica no Jellyfin 10.11+)
+    image: ghcr.io/seerr-team/seerr:latest
+    init: true
+    container_name: jellyseerr
+    environment:
+      LOG_LEVEL: info
+      TZ: ${TZ}
+    volumes:
+      - jellyseerr-config:/app/config
+    ports:
+      - "5055:5055"
+    restart: unless-stopped
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      <<: *arr-env
+      RADARR__AUTH__APIKEY: ${RADARR_API_KEY}
+    volumes:
+      - radarr-config:/config
+      - ${DATA_ROOT}:/data
+    ports:
+      - "7878:7878"
+    restart: unless-stopped
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    environment:
+      <<: *arr-env
+      SONARR__AUTH__APIKEY: ${SONARR_API_KEY}
+    volumes:
+      - sonarr-config:/config
+      - ${DATA_ROOT}:/data
+    ports:
+      - "8989:8989"
+    restart: unless-stopped
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    environment:
+      <<: *arr-env
+      PROWLARR__AUTH__APIKEY: ${PROWLARR_API_KEY}
+    volumes:
+      - prowlarr-config:/config
+    ports:
+      - "9696:9696"
+    # DNS público: operadoras (ex.: Vivo) bloqueiam os domínios dos indexers no DNS delas
+    dns: &public-dns
+      - 1.1.1.1
+      - 9.9.9.9
+    restart: unless-stopped
+
+  # Resolve o desafio anti-bot da Cloudflare para indexers como o 1337x
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      TZ: ${TZ}
+      LOG_LEVEL: info
+    dns: *public-dns
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    environment:
+      <<: *arr-env
+      WEBUI_PORT: 8080
+      TORRENTING_PORT: 6881
+    volumes:
+      - qbittorrent-config:/config
+      - ${DATA_ROOT}:/data
+    ports:
+      - "8080:8080"
+      - "6881:6881"
+      - "6881:6881/udp"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    environment:
+      <<: *arr-env
+    volumes:
+      - bazarr-config:/config
+      - ${DATA_ROOT}:/data
+    ports:
+      - "6767:6767"
+    restart: unless-stopped
+
+  # Configura tudo via API depois que os apps sobem (idempotente; pode rodar de novo).
+  setup:
+    image: python:3.13-alpine
+    container_name: jf-setup
+    command: ["python", "-u", "/setup/setup.py", "post"]
+    env_file: .env
+    volumes:
+      - ./setup:/setup:ro
+      - bazarr-config:/bazarr-config:ro
+    depends_on:
+      - jellyfin
+      - jellyseerr
+      - radarr
+      - sonarr
+      - prowlarr
+      - qbittorrent
+      - bazarr
+      - flaresolverr
+    restart: "no"
+
+volumes:
+  jellyfin-config:
+  jellyfin-cache:
+  jellyseerr-config:
+  radarr-config:
+  sonarr-config:
+  prowlarr-config:
+  qbittorrent-config:
+  bazarr-config:
